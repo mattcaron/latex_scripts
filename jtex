@@ -1,0 +1,78 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+my($BASEFILENAME);
+
+main();
+
+sub main
+{
+
+  my $user = $ENV{USER};
+
+  parseargs();
+  print("Using ${BASEFILENAME}.tex.\n");
+
+  if (system("latex ${BASEFILENAME}.tex")){
+    print("\nAborting jTeX because LaTeX failed.\n");
+    exit(1);
+  }
+  
+  system("dvips ${BASEFILENAME}.dvi -o");
+  
+  my $status=`ps -lef | grep $user | grep /usr/X11R6/bin/gv | grep -- -watch | grep -c ${BASEFILENAME}.ps`;
+  chop($status);
+
+  if ($status == 0){
+    system("/usr/X11R6/bin/gv -watch -geometry +30+5 ${BASEFILENAME}.ps &");
+  }
+  
+}
+
+##################################################
+# Parse command line arguments and set the global
+# variable $BASEFILENAME.  Exit if a .tex file cannot
+# be found.
+sub parseargs
+{
+  my(@lsarray);
+  my(@texfiles);
+  my($TEXFILENAME);
+
+  if (!@ARGV){
+    my $chosefile=0;
+    @lsarray= <*>;
+    @texfiles=grep(/^[^\#]+\.tex$/,@lsarray);
+    if (!@texfiles){
+      print("No file with \".tex\" extension found, exiting.\n");
+      exit(1);
+    }
+    if (@texfiles>1){
+      print("More than one \".tex\" file found in directory.\n");
+      my $i;
+      for ($i=0;$i<$#texfiles+1;$i++){
+	if ($texfiles[$i] eq "thesis.tex"){
+	  $TEXFILENAME=$texfiles[$i];
+	  $chosefile=1;
+	  last;
+	}
+      }
+    }
+    if (!$chosefile){
+      $TEXFILENAME=$texfiles[0];
+    }
+  }
+  else{
+    $TEXFILENAME=$ARGV[0];
+    if ( $TEXFILENAME !~ /^[^\#]+\.tex$/) {
+      $TEXFILENAME = $TEXFILENAME . ".tex";      
+    }
+    if (! -e $TEXFILENAME){
+      print("File \"${TEXFILENAME}\" not found, exiting.\n");
+      exit(1);
+    }
+  }
+  $BASEFILENAME=$TEXFILENAME;
+  $BASEFILENAME=~s/\.tex//;
+}
