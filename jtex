@@ -1,198 +1,221 @@
 #!/usr/bin/perl -w
 
+# maketex
+#
+# Create a PDF document from a (reasonably) intelligently determined
+# .tex file in the current directory.
+#
+# ----------------------------------------------------------------------------
+# Copyright 2000 Jonathan Short
+# Copyright 2001 Tim Toolan
+# Copyright 2002 Matthew Caron
+# Copyright 2010 SIXNET, LLC.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the
+# Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor,
+# Boston, MA  02110-1301
+# USA
+# ----------------------------------------------------------------------------
+
 use strict;
+use Getopt::Long;
+use Data::Dumper;
 
-my($LATEX)="latex";
-my($DVIPS)="dvips";
-my($PS2PDF)="ps2pdf";
-# my($XPDF)="xpdf -geometry +0+0";
-my($XPDF)="xpdf";
-# my($GV)="gv --antialias -geometry +0+0";
-my($GV)="evince";
-# swap not necessary anymore
-# my($GV)="gv -swap -geometry +0+0";
-# the -swap fixes the "landscape displays upside down" problem in
-# LaTeX
-# set -geometry here if you want it to start at a certain spot
+# Commands are presumed to be in your path. Otherwise, your computer
+# is broken.
 
+# FIXME - make these configurable too? (Why?)
+my $latex = "latex";
+my $dvips = "dvips";
+my $dvipdf = "dvipdf";
 
 main();
 
+##
+# Print script usage.
+#
 sub usage
 {
-  print("usage: jtex [--pdf] [--help] [--noview] [--force] [filename]\n");
-  print("  --pdf    : generate pdf instead of postscript\n");
-  print("  --help   : print usage and exit\n");
-  print("  --noview : do not invoke a viewer\n");
-  print("  --force  : force a display even if LaTeX errors\n");
-  exit(0);
+    print("usage: jtex [--ps] [--help] [--noview] [--force] " .
+          "[--viewer=<viewer] [filename]\n");
+    print("  --ps     : generate postscript instead of pdf\n");
+    print("  --help   : print usage and exit\n");
+    print("  --noview : do not invoke a viewer\n");
+    print("  --force  : force a display even if LaTeX errors\n");
+    print("  --viewer=<command>: use <command> as a viewer " . 
+          "(default: evince)\n");
 }
 
-sub main
+##
+# Determine if a file is a base tex file.
+#
+# This is as opposed to a supplementary file included by a meta file, etc.
+#
+# @param $texfile - the tex file to parse
+#
+# @return 1 if it is a base tex file
+# @return 0 if it is not a base tex file
+#
+sub isbasetexfile($)
 {
-  my($BASEFILENAME,$forpdf,$noview,$force)=parseargs();
+    my($texfile)=@_;
 
-  print("Using ${BASEFILENAME}.tex.\n");
+    if (!open(FILE,$texfile)) {
+        return(0);
+    }
 
-  # look for running gv in current terminal
-  my($foundviewer)=0;
-  if (open(PS,"ps|")){
-    my($line,$viewerbase);
+    my($line);
+    while (<FILE>) {
+        $line=$_;
+        $line =~ s/[\r\n]//g;
+        $line =~ s/\%.*//;
+        $line =~ s/^\s+//;
 
-    if ($forpdf){
-      $viewerbase=$XPDF;
+        if ($line eq "") {
+            next;
+        }
+
+        close(FILE);
+        if ($line =~ /^\\document/) {
+            return(1);
+        } else {
+            return(0);
+        }
+    }
+
+}
+
+##
+# Parse command line arguments and determine the base filename of the
+# tex file to use. If one is specified, use that, otherwise
+# look for one that has a .tex extension and begins with \document
+#
+# @return base name of file (without .tex extension) if found
+# @return undef if not
+#
+# @note This expects $ARGV[0] to contain the file name. If the command
+# line arguments have been parsed, it will, assuming it was given. If
+# not, this will search the current directory for a .tex file.
+#
+sub findfile()
+{
+    my $texFileName=$ARGV[0];
+    my $baseFileName;
+
+    if (defined($texFileName)) {
+        # Allow lazy users to not have to put .tex at the end
+        # (undocumented easter egg)
+        if ($texFileName !~ /^[^\#]+\.tex$/) {
+            $texFileName = $texFileName . ".tex";
+        }
+        # Simple existence check
+        if (! -e $texFileName) {
+            print("File \"${texFileName}\" not found, exiting.\n");
+            $texFileName = undef;
+        }
     }
     else {
-      $viewerbase=$GV;
+        # Semi-intelligently try to find it...
+        my @goodTexFiles;
+        my @lsarray= <*>;
+        my @texFiles=grep(/^[^\#]+\.tex$/,@lsarray);
+        
+        for (my $i=0; $i<scalar(@texFiles); $i++) {
+            if (isbasetexfile($texFiles[$i])) {
+                push(@goodTexFiles,$texFiles[$i]);
+            }
+        }
+
+        if (scalar(@goodTexFiles) == 0) {
+            print("No file beginning with \\document and a \".tex\" " . 
+                  "extension found, exiting.\n");
+        }
+        else {
+            if (scalar(@goodTexFiles) > 1) {
+                print("Warning: " .
+                      "More than one good \".tex\" file found in directory.\n");
+            }
+            $texFileName=$goodTexFiles[0];
+        }
     }
 
-    $viewerbase =~ s/^.*\///;
-    $viewerbase =~ s/\s.*$//;
-    while (<PS>){
-      $line = $_;
-      $line =~ s/[\r\n]//g;
-      $line =~ s/^.* //;
-
-      if ($line eq $viewerbase){
-    $foundviewer=1;
-    last;
-      }
+    if (defined($texFileName)) {
+        $baseFileName = $texFileName;
+        $baseFileName =~ s/\.tex$//;
     }
-    close(PS);
-  }
 
-  if ((system("$LATEX ${BASEFILENAME}.tex"))&&(!$force)){
-    print("\nAborting because LaTeX failed.\n");
-    exit(1);
-  }
-
-  if ($forpdf){
-    system ("$DVIPS -Ppdf -f ${BASEFILENAME}.dvi | ".
-        "$PS2PDF - ${BASEFILENAME}.pdf");
-  } else {
-    system("$DVIPS ${BASEFILENAME}.dvi -o ${BASEFILENAME}.ps");
-  }
-
-  if ((!$foundviewer)&&(!$noview)){
-    if($forpdf){
-#      system("$XPDF ${BASEFILENAME}.pdf &");
-      system("$GV ${BASEFILENAME}.pdf &");
-    } else {
-#      system("$GV --watch ${BASEFILENAME}.ps &");
-      system("$GV ${BASEFILENAME}.ps &");
-    }
-  }
+    return $baseFileName;
 }
 
-##################################################
-# Parse command line arguments and determine the base filename
-# of the tex file to use.  Exit if a .tex file cannot
-# be found.  If one is specified, use that, otherwise
-# look for one that has a .tex extension and begins with \document
-sub parseargs
+##
+# Main function.
+#
+sub main
 {
-  my($BASEFILENAME);
-
-  my($forpdf)=0;
-  my($noview)=0;
-  my($force)=0;
-
-  my(@lsarray,$i);
-  my(@texfiles,$TEXFILENAME);
-  my(@goodtexfiles);
-
-  for ($i=0;$i<$#ARGV+1;$i++){
-    if ($ARGV[$i] eq "-p" || $ARGV[$i] =~ /^--?pdf$/i ){
-      $forpdf=1;
-    }
-    elsif ($ARGV[$i] eq "-h" || $ARGV[$i] =~ /^--?help$/ ){
-      &usage();
-    }
-    elsif ($ARGV[$i] eq "-n" || $ARGV[$i] =~ /^--?noview$/){
-      $noview=1;
-    }
-    elsif ($ARGV[$i] eq "-f" || $ARGV[$i] =~ /^--?force$/){
-      $force=1;
-    }
-    elsif ($i == $#ARGV){
-      $TEXFILENAME=$ARGV[$i];
-    }
-  }
-
-  if (!defined $TEXFILENAME){
-    my $foundthesis=0;
-    @lsarray= <*>;
-    @texfiles=grep(/^[^\#]+\.tex$/,@lsarray);
-
-    for ($i=0;$i<$#texfiles+1;$i++){
-      if (&isbasetexfile($texfiles[$i])){
-    push(@goodtexfiles,$texfiles[$i]);
-    if ($texfiles[$i] eq "thesis.tex"){
-      $foundthesis=1;
-    }
-      }
+    my ($ps, $help, $force) = 0;
+    my ($view) = 1;
+    my $viewer = "evince";
+    
+    my $result = GetOptions ("ps"    => \$ps,
+                             "help"  => \$help,
+                             "view!" => \$view,
+                             "force" => \$force,
+                             "viewer=s" => \$viewer);
+    
+    if(!$result){
+        usage();
+        print("Failed to parse command line arguments.\n");
+        exit(1);
     }
 
-    if ($#goodtexfiles+1 == 0){
-      print("No file beginning with \\document and a \".tex\" extension ".
-        "found, exiting.\n");
-      &usage();
-    }
+    # At this point, all arguments parsed out by GetOptions should
+    # have been removed from ARGV, so all that is left is the optional
+    # filename.
+    my $file = findfile();
 
-    if ($#goodtexfiles+1 > 1){
-      print("More than one good \".tex\" file found in directory.\n");
-      print("@goodtexfiles\n");
+    if(!defined($file)){
+        # It's already printed out an error message
+        exit(1);
     }
+    else {
+    
+        print("Using ${file}.tex.\n");
 
-    if ($foundthesis){
-      $TEXFILENAME="thesis.tex";
+        if ((system("$latex ${file}.tex"))&&(!$force)) {
+            print("\nAborting because LaTeX failed.\n");
+            exit(1);
+        }
+        
+        if (!$ps) {
+            system ("${dvipdf} -f ${file}.dvi");
+        } else {
+            system("${dvips} ${file}.dvi -o ${file}.ps");
+        }
+        
+        # Note - this will open multiple versions of some
+        # readers. However, sufficiently smart ones (like evince) just
+        # refresh the file.
+        if ($view) {
+            if (!$ps) {
+                system("${viewer} ${file}.pdf &");
+            }
+            else {
+                system("${viewer} ${file}.ps &");
+            }
+        }
     }
-    else{
-      $TEXFILENAME=$goodtexfiles[0];
-    }
-  }
-  else{
-    if ( $TEXFILENAME !~ /^[^\#]+\.tex$/) {
-      $TEXFILENAME = $TEXFILENAME . ".tex";
-    }
-    if (! -e $TEXFILENAME){
-      print("File \"${TEXFILENAME}\" not found, exiting.\n");
-      &usage();
-    }
-  }
-  $BASEFILENAME=$TEXFILENAME;
-  $BASEFILENAME =~ s/\.tex$//;
-
-  return($BASEFILENAME,$forpdf,$noview,$force);
-}
-
-sub isbasetexfile
-{
-  my($texfile)=@_;
-
-  if (!open(FILE,$texfile)){
-    return(0);
-  }
-
-  my($line);
-  while (<FILE>){
-    $line=$_;
-    $line =~ s/[\r\n]//g;
-    $line =~ s/\%.*//;
-    $line =~ s/^\s+//;
-
-    if ($line eq ""){
-      next;
-    }
-
-    close(FILE);
-    if ($line =~ /^\\document/){
-      return(1);
-    }
-    else{
-      return(0);
-    }
-  }
-
+    exit(0);
 }
 
