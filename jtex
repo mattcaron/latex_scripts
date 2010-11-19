@@ -2,77 +2,197 @@
 
 use strict;
 
-my($BASEFILENAME);
+my($LATEX)="latex";
+my($DVIPS)="dvips";
+my($PS2PDF)="ps2pdf";
+# my($XPDF)="xpdf -geometry +0+0";
+my($XPDF)="xpdf";
+# my($GV)="gv --antialias -geometry +0+0";
+my($GV)="evince";
+# swap not necessary anymore
+# my($GV)="gv -swap -geometry +0+0";
+# the -swap fixes the "landscape displays upside down" problem in
+# LaTeX
+# set -geometry here if you want it to start at a certain spot
+
 
 main();
 
+sub usage
+{
+  print("usage: jtex [--pdf] [--help] [--noview] [--force] [filename]\n");
+  print("  --pdf    : generate pdf instead of postscript\n");
+  print("  --help   : print usage and exit\n");
+  print("  --noview : do not invoke a viewer\n");
+  print("  --force  : force a display even if LaTeX errors\n");
+  exit(0);
+}
+
 sub main
 {
+  my($BASEFILENAME,$forpdf,$noview,$force)=parseargs();
 
-  my $user = $ENV{USER};
-
-  parseargs();
   print("Using ${BASEFILENAME}.tex.\n");
 
-  if (system("latex ${BASEFILENAME}.tex")){
-    print("\nAborting jTeX because LaTeX failed.\n");
+  # look for running gv in current terminal
+  my($foundviewer)=0;
+  if (open(PS,"ps|")){
+    my($line,$viewerbase);
+
+    if ($forpdf){
+      $viewerbase=$XPDF;
+    }
+    else {
+      $viewerbase=$GV;
+    }
+
+    $viewerbase =~ s/^.*\///;
+    $viewerbase =~ s/\s.*$//;
+    while (<PS>){
+      $line = $_;
+      $line =~ s/[\r\n]//g;
+      $line =~ s/^.* //;
+
+      if ($line eq $viewerbase){
+    $foundviewer=1;
+    last;
+      }
+    }
+    close(PS);
+  }
+
+  if ((system("$LATEX ${BASEFILENAME}.tex"))&&(!$force)){
+    print("\nAborting because LaTeX failed.\n");
     exit(1);
   }
-  
-  system("dvips ${BASEFILENAME}.dvi -o");
-  
-  my $status=`ps -lef | grep $user | grep /usr/X11R6/bin/gv | grep -- -watch | grep -c ${BASEFILENAME}.ps`;
-  chop($status);
 
-  if ($status == 0){
-    system("/usr/X11R6/bin/gv -watch -geometry +30+5 ${BASEFILENAME}.ps &");
+  if ($forpdf){
+    system ("$DVIPS -Ppdf -f ${BASEFILENAME}.dvi | ".
+        "$PS2PDF - ${BASEFILENAME}.pdf");
+  } else {
+    system("$DVIPS ${BASEFILENAME}.dvi -o ${BASEFILENAME}.ps");
   }
-  
+
+  if ((!$foundviewer)&&(!$noview)){
+    if($forpdf){
+#      system("$XPDF ${BASEFILENAME}.pdf &");
+      system("$GV ${BASEFILENAME}.pdf &");
+    } else {
+#      system("$GV --watch ${BASEFILENAME}.ps &");
+      system("$GV ${BASEFILENAME}.ps &");
+    }
+  }
 }
 
 ##################################################
-# Parse command line arguments and set the global
-# variable $BASEFILENAME.  Exit if a .tex file cannot
-# be found.
+# Parse command line arguments and determine the base filename
+# of the tex file to use.  Exit if a .tex file cannot
+# be found.  If one is specified, use that, otherwise
+# look for one that has a .tex extension and begins with \document
 sub parseargs
 {
-  my(@lsarray);
-  my(@texfiles);
-  my($TEXFILENAME);
+  my($BASEFILENAME);
 
-  if (!@ARGV){
-    my $chosefile=0;
+  my($forpdf)=0;
+  my($noview)=0;
+  my($force)=0;
+
+  my(@lsarray,$i);
+  my(@texfiles,$TEXFILENAME);
+  my(@goodtexfiles);
+
+  for ($i=0;$i<$#ARGV+1;$i++){
+    if ($ARGV[$i] eq "-p" || $ARGV[$i] =~ /^--?pdf$/i ){
+      $forpdf=1;
+    }
+    elsif ($ARGV[$i] eq "-h" || $ARGV[$i] =~ /^--?help$/ ){
+      &usage();
+    }
+    elsif ($ARGV[$i] eq "-n" || $ARGV[$i] =~ /^--?noview$/){
+      $noview=1;
+    }
+    elsif ($ARGV[$i] eq "-f" || $ARGV[$i] =~ /^--?force$/){
+      $force=1;
+    }
+    elsif ($i == $#ARGV){
+      $TEXFILENAME=$ARGV[$i];
+    }
+  }
+
+  if (!defined $TEXFILENAME){
+    my $foundthesis=0;
     @lsarray= <*>;
     @texfiles=grep(/^[^\#]+\.tex$/,@lsarray);
-    if (!@texfiles){
-      print("No file with \".tex\" extension found, exiting.\n");
-      exit(1);
+
+    for ($i=0;$i<$#texfiles+1;$i++){
+      if (&isbasetexfile($texfiles[$i])){
+    push(@goodtexfiles,$texfiles[$i]);
+    if ($texfiles[$i] eq "thesis.tex"){
+      $foundthesis=1;
     }
-    if (@texfiles>1){
-      print("More than one \".tex\" file found in directory.\n");
-      my $i;
-      for ($i=0;$i<$#texfiles+1;$i++){
-	if ($texfiles[$i] eq "thesis.tex"){
-	  $TEXFILENAME=$texfiles[$i];
-	  $chosefile=1;
-	  last;
-	}
       }
     }
-    if (!$chosefile){
-      $TEXFILENAME=$texfiles[0];
+
+    if ($#goodtexfiles+1 == 0){
+      print("No file beginning with \\document and a \".tex\" extension ".
+        "found, exiting.\n");
+      &usage();
+    }
+
+    if ($#goodtexfiles+1 > 1){
+      print("More than one good \".tex\" file found in directory.\n");
+      print("@goodtexfiles\n");
+    }
+
+    if ($foundthesis){
+      $TEXFILENAME="thesis.tex";
+    }
+    else{
+      $TEXFILENAME=$goodtexfiles[0];
     }
   }
   else{
-    $TEXFILENAME=$ARGV[0];
     if ( $TEXFILENAME !~ /^[^\#]+\.tex$/) {
-      $TEXFILENAME = $TEXFILENAME . ".tex";      
+      $TEXFILENAME = $TEXFILENAME . ".tex";
     }
     if (! -e $TEXFILENAME){
       print("File \"${TEXFILENAME}\" not found, exiting.\n");
-      exit(1);
+      &usage();
     }
   }
   $BASEFILENAME=$TEXFILENAME;
-  $BASEFILENAME=~s/\.tex//;
+  $BASEFILENAME =~ s/\.tex$//;
+
+  return($BASEFILENAME,$forpdf,$noview,$force);
 }
+
+sub isbasetexfile
+{
+  my($texfile)=@_;
+
+  if (!open(FILE,$texfile)){
+    return(0);
+  }
+
+  my($line);
+  while (<FILE>){
+    $line=$_;
+    $line =~ s/[\r\n]//g;
+    $line =~ s/\%.*//;
+    $line =~ s/^\s+//;
+
+    if ($line eq ""){
+      next;
+    }
+
+    close(FILE);
+    if ($line =~ /^\\document/){
+      return(1);
+    }
+    else{
+      return(0);
+    }
+  }
+
+}
+
