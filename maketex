@@ -37,9 +37,13 @@ use Data::Dumper;
 # is broken.
 
 # FIXME - make these configurable too? (Why?)
-my $latex = "latex";
-my $dvips = "dvips";
-my $dvipdf = "dvipdf";
+my $latexToPDF = "pdflatex";
+my $makeindex = "makeindex";
+my $rerunTest = "Rerun (LaTeX|to get cross-references right)";
+my $rerunMax = 5;
+
+# Makes html files
+my $latexToHTML = "htlatex";
 
 main();
 
@@ -48,9 +52,12 @@ main();
 #
 sub usage
 {
-    print("usage: jtex [--ps] [--help] [--noview] [--force] " .
+    print("usage: jtex [--output=<output>] [--help] [--noview] [--force] " .
           "[--viewer=<viewer] [filename]\n");
-    print("  --ps     : generate postscript instead of pdf\n");
+    print("  --output : output format. Must be one of: pdf html\n");
+    print("           : If none specified, pdf is used\n");
+    print("           : Note that pdf is the only one which invokes a " . 
+          "viewer\n");
     print("  --help   : print usage and exit\n");
     print("  --noview : do not invoke a viewer\n");
     print("  --force  : force a display even if LaTeX errors\n");
@@ -125,8 +132,7 @@ sub findfile()
             print("File \"${texFileName}\" not found, exiting.\n");
             $texFileName = undef;
         }
-    }
-    else {
+    } else {
         # Semi-intelligently try to find it...
         my @goodTexFiles;
         my @lsarray= <*>;
@@ -141,8 +147,7 @@ sub findfile()
         if (scalar(@goodTexFiles) == 0) {
             print("No file beginning with \\document and a \".tex\" " . 
                   "extension found, exiting.\n");
-        }
-        else {
+        } else {
             if (scalar(@goodTexFiles) > 1) {
                 print("Warning: " .
                       "More than one good \".tex\" file found in directory.\n");
@@ -164,20 +169,25 @@ sub findfile()
 #
 sub main
 {
-    my ($ps, $help, $force) = 0;
+    my ($help, $force) = 0;
     my ($view) = 1;
     my $viewer = "evince";
+    my $output = "pdf";
     
-    my $result = GetOptions ("ps"    => \$ps,
+    my $result = GetOptions ("output=s"=> \$output,
                              "help"  => \$help,
                              "view!" => \$view,
                              "force" => \$force,
                              "viewer=s" => \$viewer);
     
-    if(!$result){
+    if (!$result) {
         usage();
         print("Failed to parse command line arguments.\n");
         exit(1);
+    }
+
+    if ($output ne "pdf"){
+        $view = 0;
     }
 
     # At this point, all arguments parsed out by GetOptions should
@@ -185,37 +195,83 @@ sub main
     # filename.
     my $file = findfile();
 
-    if(!defined($file)){
+    if (!defined($file)) {
         # It's already printed out an error message
         exit(1);
-    }
-    else {
-    
-        print("Using ${file}.tex.\n");
+    } else {
 
-        if ((system("$latex ${file}.tex"))&&(!$force)) {
-            print("\nAborting because LaTeX failed.\n");
-            exit(1);
+        print("Using ${file}.tex.\n");
+    
+        if ($output eq "html") {
+            # htlatex seems to rerun as many times as necessary, so we
+            # don't need any complicated logic here, and we don't
+            # invoke a viewer.
+            my $command = "${latexToHTML} ${file}.tex";
+            
+            if (system("${command}") && !$force) {
+                die("\nAborting because ${command} failed.\n");
+            }
+
         }
-        
-        if (!$ps) {
-            system ("${dvipdf} -f ${file}.dvi");
-        } else {
-            system("${dvips} ${file}.dvi -o ${file}.ps");
-        }
-        
-        # Note - this will open multiple versions of some
-        # readers. However, sufficiently smart ones (like evince) just
-        # refresh the file.
-        if ($view) {
-            if (!$ps) {
+        else {
+            
+            my $command = "${latexToPDF} ${file}.tex";
+            
+            # we need to run LaTeX, then make the index, then run it until
+            # it doesn't have any more cross-references to get right.
+            
+            if (system("${command}") && !$force) {
+                die("\nAborting because ${command} failed.\n");
+            }
+            
+            # Only run makeindex if someone generated it.
+            if (-f "${file}.idx") {
+                if (system("${makeindex} ${file}.idx") && $force) {
+                    die("\nAborting because ${makeindex} ${file}.idx " . 
+                        "failed.\n");
+                }
+            }
+            
+            my $rerunCount = 0;
+            my $needsRerun = 1;
+            
+            while ($needsRerun && $rerunCount < $rerunMax) {
+                $needsRerun = 0;
+                ++$rerunCount;
+                
+                my $out;
+                
+                open($out, "-|", "${command}") || 
+                  die("Unable to execute ${command}");
+                
+                while (my $line = <$out>) {
+                    if ($line =~ /$rerunTest/) {
+                        $needsRerun = 1;
+                    }
+                }
+                # Per the Perl docs:
+                # Closing any piped filehandle causes the parent
+                # process to wait for the child to finish, and returns
+                # the status value in $?
+                close($out);
+                
+                if ($? && !$force) {
+                    die("\nAborting because LaTeX failed.\n");
+                }
+            }
+            
+            if ($rerunCount == $rerunMax) {
+                print("WARNING: ran latex ${rerunCount} times, giving up\n");
+            }
+            
+            # Note - this will open multiple versions of some
+            # readers. However, sufficiently smart ones (like evince) just
+            # refresh the file.
+            if ($view) {
                 system("${viewer} ${file}.pdf &");
             }
-            else {
-                system("${viewer} ${file}.ps &");
-            }
         }
+        
     }
     exit(0);
 }
-
