@@ -1,4 +1,4 @@
-jtex:
+maketex:
 
 A nifty little script to facilitate LaTeX usage. Automagically runs
 LaTeX on a .tex file specified on the command line, then displays the
