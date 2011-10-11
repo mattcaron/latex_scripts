@@ -97,7 +97,8 @@ sub isbasetexfile($)
         close(FILE);
         if ($line =~ /^\\document/) {
             return(1);
-        } else {
+        } 
+        else {
             return(0);
         }
     }
@@ -132,7 +133,8 @@ sub findfile()
             print("File \"${texFileName}\" not found, exiting.\n");
             $texFileName = undef;
         }
-    } else {
+    } 
+    else {
         # Semi-intelligently try to find it...
         my @goodTexFiles;
         my @lsarray= <*>;
@@ -147,7 +149,8 @@ sub findfile()
         if (scalar(@goodTexFiles) == 0) {
             print("No file beginning with \\document and a \".tex\" " . 
                   "extension found, exiting.\n");
-        } else {
+        } 
+        else {
             if (scalar(@goodTexFiles) > 1) {
                 print("Warning: " .
                       "More than one good \".tex\" file found in directory.\n");
@@ -198,7 +201,8 @@ sub main
     if (!defined($file)) {
         # It's already printed out an error message
         exit(1);
-    } else {
+    } 
+    else {
 
         print("Using ${file}.tex.\n");
     
