@@ -52,7 +52,7 @@ main();
 #
 sub usage
 {
-    print("usage: jtex [--output=<output>] [--help] [--noview] [--force] " .
+    print("usage: maketex [--output=<output>] [--help] [--noview] [--force] " .
           "[--viewer=<viewer] [filename]\n");
     print("  --output : output format. Must be one of: pdf html\n");
     print("           : If none specified, pdf is used\n");
