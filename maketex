@@ -37,7 +37,7 @@ use Data::Dumper;
 # is broken.
 
 # FIXME - make these configurable too? (Why?)
-my $latexToPDF = "pdflatex";
+my $latexToPDF = "xelatex";
 my $makeindex = "makeindex";
 my $rerunTest = "Rerun (LaTeX|to get cross-references right)";
 my $rerunMax = 5;
@@ -62,7 +62,7 @@ sub usage
     print("  --noview : do not invoke a viewer\n");
     print("  --force  : force a display even if LaTeX errors\n");
     print("  --viewer=<command>: use <command> as a viewer " . 
-          "(default: evince)\n");
+          "(default: atril)\n");
 }
 
 ##
@@ -174,7 +174,7 @@ sub main
 {
     my ($help, $force) = 0;
     my ($view) = 1;
-    my $viewer = "evince";
+    my $viewer = "atril";
     my $output = "pdf";
     
     my $result = GetOptions ("output=s"=> \$output,
